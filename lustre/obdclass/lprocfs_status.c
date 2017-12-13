@@ -59,6 +59,29 @@ int lprocfs_seq_release(struct inode *inode, struct file *file)
 }
 EXPORT_SYMBOL(lprocfs_seq_release);
 
+struct dentry *ldebugfs_add_simple(struct dentry *root,
+				   char *name, void *data,
+				   const struct file_operations *fops)
+{
+	struct dentry *entry;
+	umode_t mode = 0;
+
+	if (!root || !name || !fops)
+		return ERR_PTR(-EINVAL);
+
+	if (fops->read)
+		mode = 0444;
+	if (fops->write)
+		mode |= 0200;
+	entry = debugfs_create_file(name, mode, root, data, fops);
+	if (IS_ERR_OR_NULL(entry)) {
+		CERROR("LprocFS: No memory to create <debugfs> entry %s", name);
+		return entry ?: ERR_PTR(-ENOMEM);
+	}
+	return entry;
+}
+EXPORT_SYMBOL(ldebugfs_add_simple);
+
 struct proc_dir_entry *
 lprocfs_add_simple(struct proc_dir_entry *root, char *name,
 		   void *data, const struct file_operations *fops)
@@ -1248,6 +1271,7 @@ static void obd_sysfs_release(struct kobject *kobj)
 
 int lprocfs_obd_setup(struct obd_device *obd, bool uuid_only)
 {
+	struct lprocfs_vars *debugfs_vars = NULL;
 	int rc;
 
 	if (!obd || obd->obd_magic != OBD_DEVICE_MAGIC)
@@ -1262,7 +1286,7 @@ int lprocfs_obd_setup(struct obd_device *obd, bool uuid_only)
 	if (obd->obd_attrs)
 		obd->obd_ktype.default_attrs = obd->obd_attrs;
 
-	obd->obd_kset.kobj.parent = &obd->obd_type->typ_kobj;
+	obd->obd_kset.kobj.parent = obd->obd_type->typ_kobj;
 	obd->obd_kset.kobj.ktype = &obd->obd_ktype;
 	init_completion(&obd->obd_kobj_unregister);
 	rc = kset_register(&obd->obd_kset);
@@ -1280,10 +1304,23 @@ int lprocfs_obd_setup(struct obd_device *obd, bool uuid_only)
 		return rc;
 	}
 
-	if (obd->obd_proc_entry)
-		GOTO(already_registered, rc);
+	if (!obd->obd_type->typ_procroot)
+		debugfs_vars = obd->obd_vars;
+	obd->obd_debugfs_entry = ldebugfs_register(obd->obd_name,
+						   obd->obd_type->typ_debugfs_entry,
+						   debugfs_vars, obd);
+	if (IS_ERR_OR_NULL(obd->obd_debugfs_entry)) {
+		rc = obd->obd_debugfs_entry ? PTR_ERR(obd->obd_debugfs_entry)
+					    : -ENOMEM;
+		CERROR("error %d setting up debugfs for %s\n",
+		       rc, obd->obd_name);
+		obd->obd_debugfs_entry = NULL;
+		lprocfs_obd_cleanup(obd);
+		return rc;
+	}
 
-	LASSERT(obd->obd_type->typ_procroot != NULL);
+	if (obd->obd_proc_entry || !obd->obd_type->typ_procroot)
+		GOTO(already_registered, rc);
 
 	obd->obd_proc_entry = lprocfs_register(obd->obd_name,
 					       obd->obd_type->typ_procroot,
@@ -1314,6 +1351,9 @@ int lprocfs_obd_cleanup(struct obd_device *obd)
 		lprocfs_remove(&obd->obd_proc_entry);
 		obd->obd_proc_entry = NULL;
 	}
+
+	if (!IS_ERR_OR_NULL(obd->obd_debugfs_entry))
+		ldebugfs_remove(&obd->obd_debugfs_entry);
 
 	sysfs_remove_group(&obd->obd_kset.kobj, &obd->obd_attrs_group);
 	kset_unregister(&obd->obd_kset);
@@ -1583,7 +1623,7 @@ static int lprocfs_stats_seq_open(struct inode *inode, struct file *file)
 	if (rc)
 		return rc;
 	seq = file->private_data;
-	seq->private = inode->i_private ? : PDE_DATA(inode);
+	seq->private = inode->i_private ? inode->i_private : PDE_DATA(inode);
 	return 0;
 }
 
@@ -1706,8 +1746,8 @@ void lprocfs_init_mps_stats(int num_private_stats, struct lprocfs_stats *stats)
         LPROCFS_MD_OP_INIT(num_private_stats, stats, revalidate_lock);
 }
 
-int lprocfs_alloc_md_stats(struct obd_device *obd,
-			   unsigned int num_private_stats)
+int ldebugfs_alloc_md_stats(struct obd_device *obd,
+			    unsigned int num_private_stats)
 {
 	struct lprocfs_stats *stats;
 	unsigned int num_stats;
@@ -1725,8 +1765,8 @@ int lprocfs_alloc_md_stats(struct obd_device *obd,
 	 * mdt layer does not use the md_ops interface. This is
 	 * confusing and a waste of memory. See LU-2484.
 	 */
-	LASSERT(obd->obd_proc_entry != NULL);
-	LASSERT(obd->obd_md_stats == NULL);
+	LASSERT(obd->obd_debugfs_entry);
+	LASSERT(!obd->obd_md_stats);
 	LASSERT(obd->obd_md_cntr_base == 0);
 
 	num_stats = NUM_MD_STATS + num_private_stats;
@@ -1745,7 +1785,7 @@ int lprocfs_alloc_md_stats(struct obd_device *obd,
 		}
 	}
 
-	rc = lprocfs_register_stats(obd->obd_proc_entry, "md_stats", stats);
+	rc = ldebugfs_register_stats(obd->obd_debugfs_entry, "md_stats", stats);
 	if (rc < 0) {
 		lprocfs_free_stats(&stats);
 	} else {
@@ -1755,7 +1795,7 @@ int lprocfs_alloc_md_stats(struct obd_device *obd,
 
 	return rc;
 }
-EXPORT_SYMBOL(lprocfs_alloc_md_stats);
+EXPORT_SYMBOL(ldebugfs_alloc_md_stats);
 
 void lprocfs_free_md_stats(struct obd_device *obd)
 {
@@ -2280,6 +2320,15 @@ int ldebugfs_seq_create(struct dentry *parent, const char *name, umode_t mode,
 	return 0;
 }
 EXPORT_SYMBOL_GPL(ldebugfs_seq_create);
+
+int ldebugfs_obd_seq_create(struct obd_device *obd, const char *name,
+			    umode_t mode, const struct file_operations *fops,
+			    void *data)
+{
+	return ldebugfs_seq_create(obd->obd_debugfs_entry, name, mode, fops,
+				   data);
+}
+EXPORT_SYMBOL_GPL(ldebugfs_obd_seq_create);
 
 int lprocfs_seq_create(struct proc_dir_entry *parent,
 		       const char *name,

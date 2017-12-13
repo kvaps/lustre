@@ -1291,9 +1291,9 @@ static int lmv_setup(struct obd_device *obd, struct lustre_cfg *lcfg)
 #ifdef CONFIG_PROC_FS
 	obd->obd_vars = lprocfs_lmv_obd_vars;
 	lprocfs_obd_setup(obd, true);
-	lprocfs_alloc_md_stats(obd, 0);
-	rc = lprocfs_seq_create(obd->obd_proc_entry, "target_obd",
-				0444, &lmv_proc_target_fops, obd);
+	ldebugfs_alloc_md_stats(obd, 0);
+	rc = ldebugfs_obd_seq_create(obd, "target_obd", 0444,
+				     &lmv_proc_target_fops, obd);
 	if (rc)
 		CWARN("%s: error adding LMV target_obd file: rc = %d\n",
 		      obd->obd_name, rc);

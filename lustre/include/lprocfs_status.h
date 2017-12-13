@@ -459,8 +459,8 @@ extern void lprocfs_init_mps_stats(int num_private_stats,
 extern void lprocfs_init_ldlm_stats(struct lprocfs_stats *ldlm_stats);
 extern int lprocfs_alloc_obd_stats(struct obd_device *obddev,
                                    unsigned int num_private_stats);
-extern int lprocfs_alloc_md_stats(struct obd_device *obddev,
-                                  unsigned int num_private_stats);
+int ldebugfs_alloc_md_stats(struct obd_device *obddev,
+			    unsigned int num_private_stats);
 extern void lprocfs_counter_init(struct lprocfs_stats *stats, int index,
                                  unsigned conf, const char *name,
                                  const char *units);
@@ -473,10 +473,14 @@ extern int lprocfs_add_clear_entry(struct obd_device * obd,
 #ifdef HAVE_SERVER_SUPPORT
 extern int lprocfs_exp_setup(struct obd_export *exp, lnet_nid_t *peer_nid);
 extern int lprocfs_exp_cleanup(struct obd_export *exp);
+struct dentry *ldebugfs_add_symlink(const char *name, const char *target,
+				    const char *format, ...);
 #else
 static inline int lprocfs_exp_cleanup(struct obd_export *exp)
 { return 0; }
 #endif
+struct dentry *ldebugfs_add_simple(struct dentry *root, char *name, void *data,
+				   const struct file_operations *fops);
 extern struct proc_dir_entry *
 lprocfs_add_simple(struct proc_dir_entry *root, char *name,
 		   void *data, const struct file_operations *fops);
@@ -536,16 +540,17 @@ static inline int LPROCFS_ENTRY_CHECK(struct inode *inode)
 { return 0; }
 #endif
 
-extern int lprocfs_obd_setup(struct obd_device *dev, bool uuid_only);
+extern int lprocfs_obd_setup(struct obd_device *obd, bool uuid_only);
 extern int lprocfs_obd_cleanup(struct obd_device *obd);
 #ifdef HAVE_SERVER_SUPPORT
 extern const struct file_operations lprocfs_evict_client_fops;
 #endif
 
-extern int ldebugfs_seq_create(struct dentry *parent, const char *name,
-			       umode_t mode,
-			       const struct file_operations *seq_fops,
-			       void *data);
+int ldebugfs_seq_create(struct dentry *parent, const char *name, umode_t mode,
+			const struct file_operations *seq_fops, void *data);
+int ldebugfs_obd_seq_create(struct obd_device *obd, const char *name,
+			    umode_t mode, const struct file_operations *fops,
+			    void *data);
 extern int lprocfs_seq_create(struct proc_dir_entry *parent, const char *name,
 			      mode_t mode,
 			      const struct file_operations *seq_fops,
@@ -655,9 +660,10 @@ extern int lprocfs_seq_release(struct inode *, struct file *);
 	up_read(&(obd)->u.cli.cl_sem);
 
 /* write the name##_seq_show function, call LPROC_SEQ_FOPS_RO for read-only
-  proc entries; otherwise, you will define name##_seq_write function also for
-  a read-write proc entry, and then call LPROC_SEQ_SEQ instead. Finally,
-  call lprocfs_obd_seq_create(obd, filename, 0444, &name#_fops, data); */
+ * proc entries; otherwise, you will define name##_seq_write function also for
+ * a read-write proc entry, and then call LPROC_SEQ_FOPS instead. Finally,
+ * call ldebugfs_obd_seq_create(obd, filename, 0444, &name#_fops, data);
+ */
 #define __LPROC_SEQ_FOPS(name, custom_seq_write)			\
 static int name##_single_open(struct inode *inode, struct file *file)	\
 {									\
@@ -722,6 +728,25 @@ static const struct file_operations name##_fops = {			\
 		.open	 = name##_##type##_open,			\
 		.write	 = name##_##type##_write,			\
 		.release = lprocfs_single_release,			\
+	};
+
+#define LDEBUGFS_FOPS_WR_ONLY(name, type)				\
+	static ssize_t name##_##type##_write(struct file *file,		\
+			const char __user *buffer, size_t count,	\
+			loff_t *off)					\
+	{								\
+		return ldebugfs_##type##_seq_write(file, buffer, count,	\
+						   off);		\
+	}								\
+	static int name##_##type##_open(struct inode *inode,		\
+					struct file *file)		\
+	{								\
+		return single_open(file, NULL, inode->i_private);	\
+	}								\
+	static const struct file_operations name##_##type##_fops = {	\
+		.open	 = name##_##type##_open,			\
+		.write	 = name##_##type##_write,			\
+		.release = single_release,				\
 	};
 
 struct lustre_attr {
@@ -835,9 +860,6 @@ static inline void lprocfs_init_ldlm_stats(struct lprocfs_stats *ldlm_stats)
 { return; }
 static inline int lprocfs_alloc_obd_stats(struct obd_device *obddev,
                                           unsigned int num_private_stats)
-{ return 0; }
-static inline int lprocfs_alloc_md_stats(struct obd_device *obddev,
-                                         unsigned int num_private_stats)
 { return 0; }
 static inline void lprocfs_free_obd_stats(struct obd_device *obddev)
 { return; }

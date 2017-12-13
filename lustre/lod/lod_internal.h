@@ -72,7 +72,7 @@ struct pool_desc {
 	struct lod_qos_rr	 pool_rr;
 	struct hlist_node	 pool_hash;	/* access by poolname */
 	struct list_head	 pool_list;
-	struct proc_dir_entry	*pool_proc_entry;
+	struct dentry		*pool_debugfs_entry;
 	struct obd_device	*pool_lobd;	/* owner */
 };
 
@@ -167,7 +167,6 @@ struct lod_device {
 	struct dt_device      lod_dt_dev;
 	struct obd_export    *lod_child_exp;
 	struct dt_device     *lod_child;
-	struct proc_dir_entry *lod_proc_entry;
 	struct lprocfs_stats *lod_stats;
 	spinlock_t	      lod_connects_lock;
 	int		      lod_connects;
@@ -206,11 +205,12 @@ struct lod_device {
 	int			lod_pool_count;
 	struct cfs_hash	       *lod_pools_hash_body; /* used for key access */
 	struct list_head	lod_pool_list; /* used for sequential access */
-	struct proc_dir_entry  *lod_pool_proc_entry;
+	struct dentry	       *lod_pool_debugfs_entry;
 
 	enum lustre_sec_part   lod_sp_me;
 
 	struct proc_dir_entry *lod_symlink;
+	struct dentry	       *lod_debugfs;
 
 	/* ROOT object, used to fetch FS default striping */
 	struct lod_object      *lod_md_root;

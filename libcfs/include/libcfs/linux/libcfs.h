@@ -44,6 +44,7 @@
 #include <linux/bitops.h>
 #include <linux/compiler.h>
 #include <linux/ctype.h>
+#include <linux/err.h>
 #include <linux/errno.h>
 #include <linux/file.h>
 #include <linux/fs.h>
@@ -120,6 +121,16 @@ do {                                                                    \
 #define CFS_CHECK_STACK(msgdata, mask, cdls) do {} while(0)
 #define CDEBUG_STACK() (0L)
 #endif /* __x86_64__ */
+
+#ifndef HAVE_PTR_ERR_OR_ZERO
+static inline int __must_check PTR_ERR_OR_ZERO(__force const void *ptr)
+{
+	if (IS_ERR(ptr))
+		return PTR_ERR(ptr);
+	else
+		return 0;
+}
+#endif
 
 /**
  * Platform specific declarations for cfs_curproc API (libcfs/curproc.h)

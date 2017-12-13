@@ -49,6 +49,23 @@ AS_IF([test "x$enable_panic_dumplog" = xyes],
 ]) # LIBCFS_CONFIG_PANIC_DUMPLOG
 
 #
+# LIBCFS_PTR_ERR_OR_ZERO
+#
+# For some reason SLES12 is missing the PTR_ERR_OR_ZERO macro
+#
+AC_DEFUN([LIBCFS_PTR_ERR_OR_ZERO_MISSING], [
+LB_CHECK_COMPILE([if 'PTR_ERR_OR_ZERO' is missing],
+is_err_or_null, [
+	#include <linux/err.h>
+],[
+	if (PTR_ERR_OR_ZERO(NULL)) return 0;
+],[
+	AC_DEFINE(HAVE_PTR_ERR_OR_ZERO, 1,
+		['PTR_ERR_OR_ZERO' exist])
+])
+]) # LIBCFS_PTR_ERR_OR_ZERO_MISSING
+
+#
 # LIBCFS_STACKTRACE_OPS_HAVE_WALK_STACK
 #
 # 2.6.32-30.el6 adds a new 'walk_stack' field in 'struct stacktrace_ops'
@@ -798,6 +815,8 @@ AC_MSG_NOTICE([LibCFS kernel checks
 ==============================================================================])
 LIBCFS_CONFIG_PANIC_DUMPLOG
 
+# SLES12 brokeness
+LIBCFS_PTR_ERR_OR_ZERO_MISSING
 # 2.6.32
 LIBCFS_STACKTRACE_OPS_HAVE_WALK_STACK
 LC_SHRINKER_WANT_SHRINK_PTR

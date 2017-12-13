@@ -278,7 +278,7 @@ static int lov_target_seq_open(struct inode *inode, struct file *file)
 		return rc;
 
 	seq = file->private_data;
-	seq->private = PDE_DATA(inode);
+	seq->private = inode->i_private;
 	return 0;
 }
 
@@ -300,7 +300,7 @@ struct lprocfs_vars lprocfs_lov_obd_vars[] = {
 	{ NULL }
 };
 
-struct file_operations lov_proc_target_fops = {
+const struct file_operations lov_debugfs_target_fops = {
         .owner   = THIS_MODULE,
         .open    = lov_target_seq_open,
         .read    = seq_read,

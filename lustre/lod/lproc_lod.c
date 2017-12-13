@@ -727,7 +727,7 @@ static int lod_osts_seq_open(struct inode *inode, struct file *file)
 		return rc;
 
 	seq = file->private_data;
-	seq->private = PDE_DATA(inode);
+	seq->private = inode->i_private;
 	return 0;
 }
 
@@ -837,12 +837,12 @@ static struct lprocfs_vars lprocfs_lod_osd_vars[] = {
 	{ .name = NULL }
 };
 
-static const struct file_operations lod_proc_target_fops = {
+static const struct file_operations lod_debugfs_target_fops = {
 	.owner   = THIS_MODULE,
 	.open    = lod_osts_seq_open,
 	.read    = seq_read,
 	.llseek  = seq_lseek,
-	.release = lprocfs_seq_release,
+	.release = seq_release,
 };
 
 /**
@@ -855,10 +855,11 @@ static const struct file_operations lod_proc_target_fops = {
  */
 int lod_procfs_init(struct lod_device *lod)
 {
-	struct obd_device	*obd = lod2obd(lod);
-	struct proc_dir_entry	*lov_proc_dir = NULL;
-	struct obd_type		*type;
-	int			 rc;
+	struct obd_device *obd = lod2obd(lod);
+	struct proc_dir_entry *lov_proc_dir;
+	struct obd_type *type;
+	struct kobject *lov;
+	int rc;
 
 	obd->obd_vars = lprocfs_lod_obd_vars;
 	rc = lprocfs_obd_setup(obd, true);
@@ -876,24 +877,38 @@ int lod_procfs_init(struct lod_device *lod)
 		GOTO(out, rc);
 	}
 
-	rc = lprocfs_seq_create(obd->obd_proc_entry, "target_obd",
-				0444, &lod_proc_target_fops, obd);
+	rc = ldebugfs_obd_seq_create(obd, "target_obd", 0444,
+				     &lod_debugfs_target_fops, obd);
 	if (rc) {
 		CWARN("%s: Error adding the target_obd file %d\n",
 		      obd->obd_name, rc);
 		GOTO(out, rc);
 	}
 
-	lod->lod_pool_proc_entry = lprocfs_register("pools",
-						    obd->obd_proc_entry,
-						    NULL, NULL);
-	if (IS_ERR(lod->lod_pool_proc_entry)) {
-		rc = PTR_ERR(lod->lod_pool_proc_entry);
-		lod->lod_pool_proc_entry = NULL;
-		CWARN("%s: Failed to create pool proc file: %d\n",
+	lod->lod_pool_debugfs_entry = ldebugfs_register("pools",
+							obd->obd_debugfs_entry,
+							NULL, NULL);
+	if (IS_ERR_OR_NULL(lod->lod_pool_debugfs_entry)) {
+		rc = lod->lod_pool_debugfs_entry ? PTR_ERR(lod->lod_pool_debugfs_entry)
+						 : -ENOMEM;
+		lod->lod_pool_debugfs_entry = NULL;
+		CWARN("%s: Failed to create pool debugfs file: %d\n",
 		      obd->obd_name, rc);
 		GOTO(out, rc);
 	}
+
+	lov = kset_find_obj(lustre_kset, "lov");
+	if (lov) {
+		rc = sysfs_create_link(lov, &obd->obd_kset.kobj,
+				       obd->obd_name);
+		kobject_put(lov);
+	}
+
+	lod->lod_debugfs = ldebugfs_add_symlink(obd->obd_name, "lov",
+						"../lod/%s", obd->obd_name);
+	if (!lod->lod_debugfs)
+		CERROR("%s: failed to create LOV debugfs symlink\n",
+		       obd->obd_name);
 
 	/* If the real LOV is present which is the case for setups
 	 * with both server and clients on the same node then use
@@ -929,16 +944,24 @@ out:
 void lod_procfs_fini(struct lod_device *lod)
 {
 	struct obd_device *obd = lod2obd(lod);
+	struct kobject *lov;
 
 	if (lod->lod_symlink != NULL) {
 		lprocfs_remove(&lod->lod_symlink);
 		lod->lod_symlink = NULL;
 	}
 
-	if (lod->lod_pool_proc_entry != NULL) {
-		lprocfs_remove(&lod->lod_pool_proc_entry);
-		lod->lod_pool_proc_entry = NULL;
+	lov = kset_find_obj(lustre_kset, "lov");
+	if (lov) {
+		sysfs_remove_link(lov, obd->obd_name);
+		kobject_put(lov);
 	}
+
+	if (!IS_ERR_OR_NULL(lod->lod_debugfs))
+		ldebugfs_remove(&lod->lod_debugfs);
+
+	if (!IS_ERR_OR_NULL(lod->lod_pool_debugfs_entry))
+		ldebugfs_remove(&lod->lod_pool_debugfs_entry);
 
 	lprocfs_obd_cleanup(obd);
 }

@@ -60,7 +60,7 @@ static void lov_pool_putref(struct pool_desc *pool)
 	if (atomic_dec_and_test(&pool->pool_refcount)) {
 		LASSERT(hlist_unhashed(&pool->pool_hash));
 		LASSERT(list_empty(&pool->pool_list));
-		LASSERT(pool->pool_proc_entry == NULL);
+		LASSERT(pool->pool_debugfs_entry == NULL);
 		lov_ost_pool_free(&(pool->pool_obds));
 		OBD_FREE_PTR(pool);
 		EXIT;
@@ -150,7 +150,6 @@ struct cfs_hash_ops pool_hash_operations = {
 
 };
 
-#ifdef CONFIG_PROC_FS
 /*
  * pool /proc seq_file methods
  */
@@ -167,7 +166,7 @@ struct pool_iterator {
         int idx;        /* from 0 to pool_tgt_size - 1 */
 };
 
-static void *pool_proc_next(struct seq_file *s, void *v, loff_t *pos)
+static void *pool_debugfs_next(struct seq_file *s, void *v, loff_t *pos)
 {
         struct pool_iterator *iter = (struct pool_iterator *)s->private;
         int prev_idx;
@@ -190,7 +189,7 @@ static void *pool_proc_next(struct seq_file *s, void *v, loff_t *pos)
         return iter;
 }
 
-static void *pool_proc_start(struct seq_file *s, loff_t *pos)
+static void *pool_debugfs_start(struct seq_file *s, loff_t *pos)
 {
         struct pool_desc *pool = (struct pool_desc *)s->private;
         struct pool_iterator *iter;
@@ -220,16 +219,16 @@ static void *pool_proc_start(struct seq_file *s, loff_t *pos)
                 loff_t i;
                 void *ptr;
 
-                i = 0;
-                do {
-                     ptr = pool_proc_next(s, &iter, &i);
-                } while ((i < *pos) && (ptr != NULL));
-                return ptr;
-        }
-        return iter;
+		i = 0;
+		do {
+			ptr = pool_debugfs_next(s, &iter, &i);
+		} while ((i < *pos) && (ptr != NULL));
+		return ptr;
+	}
+	return iter;
 }
 
-static void pool_proc_stop(struct seq_file *s, void *v)
+static void pool_debugfs_stop(struct seq_file *s, void *v)
 {
         struct pool_iterator *iter = (struct pool_iterator *)s->private;
 
@@ -238,7 +237,7 @@ static void pool_proc_stop(struct seq_file *s, void *v)
          * we have to free only if s->private is an iterator */
         if ((iter) && (iter->magic == POOL_IT_MAGIC)) {
 		up_read(&pool_tgt_rw_sem(iter->pool));
-                /* we restore s->private so next call to pool_proc_start()
+		/* we restore s->private so next call to pool_debugfs_start()
                  * will work */
                 s->private = iter->pool;
                 lov_pool_putref(iter->pool);
@@ -247,7 +246,7 @@ static void pool_proc_stop(struct seq_file *s, void *v)
         return;
 }
 
-static int pool_proc_show(struct seq_file *s, void *v)
+static int pool_debugfs_show(struct seq_file *s, void *v)
 {
         struct pool_iterator *iter = (struct pool_iterator *)v;
         struct lov_tgt_desc *tgt;
@@ -263,32 +262,31 @@ static int pool_proc_show(struct seq_file *s, void *v)
         return 0;
 }
 
-static struct seq_operations pool_proc_ops = {
-        .start          = pool_proc_start,
-        .next           = pool_proc_next,
-        .stop           = pool_proc_stop,
-        .show           = pool_proc_show,
+static const struct seq_operations pool_debugfs_ops = {
+	.start          = pool_debugfs_start,
+	.next           = pool_debugfs_next,
+	.stop           = pool_debugfs_stop,
+	.show           = pool_debugfs_show,
 };
 
-static int pool_proc_open(struct inode *inode, struct file *file)
+static int pool_debugfs_open(struct inode *inode, struct file *file)
 {
         int rc;
 
-        rc = seq_open(file, &pool_proc_ops);
+	rc = seq_open(file, &pool_debugfs_ops);
         if (!rc) {
                 struct seq_file *s = file->private_data;
-		s->private = PDE_DATA(inode);
+		s->private = inode->i_private;
         }
         return rc;
 }
 
-static struct file_operations pool_proc_operations = {
-        .open           = pool_proc_open,
+static const struct file_operations pool_debugfs_operations = {
+	.open           = pool_debugfs_open,
         .read           = seq_read,
         .llseek         = seq_lseek,
         .release        = seq_release,
 };
-#endif /* CONFIG_PROC_FS */
 
 void lov_dump_pool(int level, struct pool_desc *pool)
 {
@@ -451,20 +449,19 @@ int lov_pool_new(struct obd_device *obd, char *poolname)
 
 	INIT_HLIST_NODE(&new_pool->pool_hash);
 
-#ifdef CONFIG_PROC_FS
 	/* get ref for /proc file */
         lov_pool_getref(new_pool);
-	new_pool->pool_proc_entry = lprocfs_add_simple(lov->lov_pool_proc_entry,
-						       poolname, new_pool,
-						       &pool_proc_operations);
-	if (IS_ERR(new_pool->pool_proc_entry)) {
-		CWARN("Cannot add proc pool entry "LOV_POOLNAMEF"\n", poolname);
-		new_pool->pool_proc_entry = NULL;
+	new_pool->pool_debugfs_entry = ldebugfs_add_simple(lov->lov_pool_debugfs_entry,
+							   poolname, new_pool,
+							   &pool_debugfs_operations);
+	if (IS_ERR_OR_NULL(new_pool->pool_debugfs_entry)) {
+		CWARN("%s: Cannot add debufs pool entry " LOV_POOLNAMEF "\n",
+		      obd->obd_name, poolname);
+		new_pool->pool_debugfs_entry = NULL;
 		lov_pool_putref(new_pool);
 	}
 	CDEBUG(D_INFO, "pool %p - proc %p\n",
-	       new_pool, new_pool->pool_proc_entry);
-#endif
+	       new_pool, new_pool->pool_debugfs_entry);
 
 	spin_lock(&obd->obd_dev_lock);
 	list_add_tail(&new_pool->pool_list, &lov->lov_pool_list);
@@ -487,7 +484,9 @@ out_err:
 	list_del_init(&new_pool->pool_list);
 	lov->lov_pool_count--;
 	spin_unlock(&obd->obd_dev_lock);
-        lprocfs_remove(&new_pool->pool_proc_entry);
+
+	ldebugfs_remove(&new_pool->pool_debugfs_entry);
+
 	lov_ost_pool_free(&new_pool->pool_obds);
 	OBD_FREE_PTR(new_pool);
 
@@ -507,9 +506,9 @@ int lov_pool_del(struct obd_device *obd, char *poolname)
         if (pool == NULL)
                 RETURN(-ENOENT);
 
-        if (pool->pool_proc_entry != NULL) {
-                CDEBUG(D_INFO, "proc entry %p\n", pool->pool_proc_entry);
-                lprocfs_remove(&pool->pool_proc_entry);
+	if (!IS_ERR_OR_NULL(pool->pool_debugfs_entry)) {
+		CDEBUG(D_INFO, "proc entry %p\n", pool->pool_debugfs_entry);
+		ldebugfs_remove(&pool->pool_debugfs_entry);
                 lov_pool_putref(pool);
         }
 

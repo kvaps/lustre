@@ -102,13 +102,15 @@ struct obd_type {
 	struct md_ops		*typ_md_ops;
 	struct proc_dir_entry	*typ_procroot;
 	struct proc_dir_entry	*typ_procsym;
-	__u32			 typ_sym_filter;
+	struct dentry		*typ_debugfs_entry;
+#ifdef HAVE_SERVER_SUPPORT
+	bool			 typ_sym_filter;
+#endif
 	char			*typ_name;
 	int			 typ_refcnt;
 	struct lu_device_type	*typ_lu;
 	spinlock_t		 obd_type_lock;
-	struct kobject		 typ_kobj;
-	struct completion	 typ_kobj_unregister;
+	struct kobject		*typ_kobj;
 };
 
 struct brw_page {
@@ -399,7 +401,7 @@ struct lov_obd {
 	int			lov_pool_count;
 	struct cfs_hash	       *lov_pools_hash_body; /* used for key access */
 	struct list_head	lov_pool_list;	/* used for sequential access */
-	struct proc_dir_entry  *lov_pool_proc_entry;
+	struct dentry	       *lov_pool_debugfs_entry;
 	enum lustre_sec_part	lov_sp_me;
 
 	/* Cached LRU and unstable data from upper layer */
@@ -705,6 +707,7 @@ struct obd_device {
 	unsigned int			 obd_md_cntr_base;
 	struct lprocfs_stats		*obd_md_stats;
 
+	struct dentry			*obd_debugfs_entry;
 	struct proc_dir_entry	*obd_proc_entry;
 	struct proc_dir_entry	*obd_proc_exports_entry;
 	struct proc_dir_entry	*obd_svc_procroot;

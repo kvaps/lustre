@@ -992,7 +992,7 @@ int mdt_procfs_init(struct mdt_device *mdt, const char *name)
 	if (obd->obd_proc_exports_entry)
 		lprocfs_add_simple(obd->obd_proc_exports_entry, "clear",
 				   obd, &mdt_nid_stats_clear_fops);
-	rc = lprocfs_alloc_md_stats(obd, LPROC_MDT_LAST);
+	rc = ldebugfs_alloc_md_stats(obd, LPROC_MDT_LAST);
 	if (rc)
 		return rc;
 	mdt_stats_counter_init(obd->obd_md_stats);

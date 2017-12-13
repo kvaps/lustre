@@ -221,7 +221,7 @@ struct pool_desc {
 	atomic_t		 pool_refcount;
 	struct hlist_node	 pool_hash;	/* access by poolname */
 	struct list_head	 pool_list;	/* serial access */
-	struct proc_dir_entry	*pool_proc_entry;
+	struct dentry		*pool_debugfs_entry;
 	struct obd_device	*pool_lobd;	/* owner */
 };
 
@@ -305,7 +305,7 @@ void lsm_free_plain(struct lov_stripe_md *lsm);
 void dump_lsm(unsigned int level, const struct lov_stripe_md *lsm);
 
 /* lproc_lov.c */
-extern struct file_operations lov_proc_target_fops;
+extern const struct file_operations lov_debugfs_target_fops;
 #ifdef CONFIG_PROC_FS
 extern struct lprocfs_vars lprocfs_lov_obd_vars[];
 #endif
